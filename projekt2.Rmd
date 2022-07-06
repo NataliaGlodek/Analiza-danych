@@ -1,0 +1,298 @@
+---
+title: "Projekt2"
+author: "Natalia Głodek"
+date: "19 01 2022"
+output: html_document
+---
+
+```{r include=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(dygraphs)
+library(xts)  
+library(lubridate)
+library(plotly)
+library(viridis)
+library(hrbrthemes)
+library(maps)
+library(readr)
+library(CGPfunctions)
+
+```
+
+# Wczytywanie danych
+
+Swoją pracę rozpoczęłam od przygotowania bazy danych.W porozumieniu z firmą X weszłam w posiadanie danych sprzedażowych za rok 2017 oraz 2018. Firma zajmuje się detaliczną oraz hurtową dystrybucją odzieży i tekstyliów w Polsce. Dostarczone dane zostały odpowiednio okrojone poprzez usunięcie rekordów z topowymi klientami. Zobowiązałam się również, iż w związku z ustawą RODO, usunę wszystkie dane osobowe, pozwalające na identyfikację klientów firmy. Dlatego usunęłam kolumny przedstawiające szczegółowe dane adresowe i kontaktowe. Nazwy kontrahentów podmieniłam na nazwiska olimpijczyków z zewnętrznej bazy danych. Dostarczone baza została wyeksportowana z systemu ERP firmy X i zapisana w postaci pliku csv.
+
+Przed wczytaniem danych do RStudio przyjrzałam im się w excelu i zaplanowałam jakie wizualizacje będę tworzyła. Ponieważ dane były zaprezentowane w różnych arkuszach, wybrałam interesujące mnie elementy i za pomocą formuły v-lookup zestawiłam je w jednej tabeli. Aby wykonać niektóre z wybranych przez siebie wykresów, musiałam wyszukać w Internecie dodatkowe dane i dodać je do tabeli głównej, m.in. koordynaty geograficzne polskich miast.
+
+Następnie zaimportowałam dane do RStudio. Tam stworzyłam tabele, do której dodałam trzy interesujące mnie kolumny: zysk w euro, całkowita sprzedaż w euro oraz marża. Ponieważ firma, sprzedane towary zakupuje w walucie euro, a sprzedaje w euro jak i w polskich złotych, postanowiłam do celów analitycznych wybrać walutę euro jako główną.
+
+```{r message=FALSE, warning=FALSE}
+sample1 <- read_delim("sample1.csv", 
+                      delim = ";", 
+                      escape_double = FALSE, 
+                      col_types = cols(`Operation Date` = col_date(format = "%Y%m%d"), 
+                                       Year = col_factor(levels = c("2017", "2018")),  
+                                       lat = col_number(),
+                                       long = col_number()),
+                     trim_ws = TRUE)
+
+#wyfiltrowac korekty document typy i fracht item type
+
+
+dane <- sample1 %>% filter(`Document Type` != "Credit Note",
+                `Item Type` != "Fracht") %>%
+  mutate(total_sales_in_euro = Quantity*`Item Price`/`Euro Rate`, 
+                           profit_in_euro = total_sales_in_euro - `MEK Purchase Value`,
+                           margin = profit_in_euro/total_sales_in_euro)
+
+```
+
+# Co przedstawiają moje dane?
+
+Moje dane zawierają szczegóły transakcji sprzedażowych firmy X. W kolumnie „Document Type” zawarta jest informacja czy dana operacja była sprzedażą, czy korektą sprzedaży. Będę się zajmowała jedynie sprzedażą, dlatego wybieram typ: Invoice. W kolejnych kolumnach mamy informacje o kontrahencie firmy oraz podstawowe informacje adresowe (kod pocztowy, miejscowość oraz współrzędne geograficzne). W dalszej części tabeli możemy dużo dowiedzieć się o sprzedanym produkcie, min. o jego rodzaju, kolorze, rozmiarze cenie sprzedażowej jak i zakupowej, walucie operacji i sprzedanym wolumenie. 
+W przedstawionym poniżej projekcie, będę analizowała sprzedaż firmy X, jej strukturę, wysokość, rozłożenie.
+
+
+```{r}
+
+str(dane)
+
+```
+
+
+# Wykres nr 1
+
+Na pierwszym wykresie, przedstawiam dzienną wartość sprzedaży w analizowany okresie. Na stronie data-to-viz znalazłam odpowiedni do tego wykres. Funkcja slidera pozwala na zbliżenie i szczegółowe przejrzenie danych, ale moża również spojrzeć z perspektywy całego okresu.
+
+```{r}
+sprzedaz_data <- dane %>% select(`Operation Date`, total_sales_in_euro)
+
+don <- xts(x = sprzedaz_data$total_sales_in_euro, 
+           order.by = sprzedaz_data$`Operation Date`)
+
+dygraph(don, 
+        main = "Dzienna wartość sprzedaży 2017-2018 ",
+        xlab = "data",
+        ylab = "wartość sprzedaży") %>%
+  dyOptions(labelsUTC = TRUE, 
+            fillGraph=TRUE, 
+            fillAlpha=0.4, 
+            drawGrid = FALSE, 
+            colors="lightblu1") %>%
+  dyRangeSelector() %>%
+  dyCrosshair(direction = "vertical") %>%
+  dyHighlight(highlightCircleSize = 5, 
+              highlightSeriesBackgroundAlpha = 0.2, 
+              hideOnMouseOut = FALSE)  %>%
+  dyRoller(rollPeriod = 1)
+
+```
+
+### Wnioski
+
+Sprzedaż dzienna w analizowanej firmie jest nieregularna i cechuje ją wysoka zmienność. Może to wynikać z faktu, iż firma zajmuje się sprzedażą detaliczną jak i hurtową. Transakcje hurtowe powodują, iż dzienne wartości mogą istotnie różnić się od siebie. Fakt ten nie pozwala na wyciągnięcie wniosków o sezonowości sprzedaży. Dlatego poprzez agregację danym przyjrzę się im na przestrzeni kwartałów.
+
+
+# Wykres nr 2
+
+Chcąc sprawdzić, czy na sprzedaż firmy X ma wpływ sezonowość, a jeśli tak, to który kwartał charakteryzuje się sprzedażą największej ilości produktów, postanowiłam przedstawić dane na slopegrafie.
+Aby pogrupować dane na kwartały, używam zmiennej system i w zależności od kwartału przypisuję mu wybrane miesiące, a następnie grupuję po latach i nowo utworzonej zmiennej system 
+
+
+```{r}
+
+miesiace <- dane %>%
+  group_by(Year, Month) %>%
+  summarize(sum = sum(Quantity),
+            ) %>%
+  mutate(system = ifelse(Month %in% c("January", "February", "March"), "Q1",
+                         ifelse(Month %in% c("April", "May", "June"), "Q2",
+                                ifelse(Month %in%c("July", "August", "September" ),"Q3","Q4")))) %>%
+  group_by(Year, Quarter = system) %>%
+  summarize(sum_of_quantity = sum(sum)) %>% 
+  as.data.frame()
+
+miesiace %>% newggslopegraph(Times = Quarter, 
+                             Measurement = sum_of_quantity, 
+                             Grouping = Year, 
+                             Title = "Ilosc sprzedanych produktów wg kwartalow",
+                             SubTitle = "",
+                             Caption = NULL,
+                             LineThickness = 1.5,
+                             LineColor = "lightblue3",
+                             DataTextSize = 2.75,
+                             DataTextColor = "black")
+
+```
+
+### Wnioski
+Na przedstawionym slopgrafie widzimy, iż największy wolumen sprzedaży to kwartał drugi, zarówno w roku 2017 jak i w roku 2018. Drugi największy wolumen jest w kwartale trzecim, również w następujących po sobie latach. Można z tego wywnioskować, iż największa ilość sprzedawanych produktów przypada na okres letni, od kwietnia do września,   ze szczytem sezonu przypadającym na Q2. Z przedstawionego wykresu, widać również wyraźnie, że firma się rozwija i w każdym kwartale roku 2018 zwiększyła swój wolumen sprzedaży w porównaniu z rokiem 2017.
+
+
+# Wykres 3
+
+Najbardziej ruchliwym kwartałem okazał się kwartał 2 w roku 2018. Przeanalizujmy sprzedaz, zyski oraz marżę w jednym z miesięcy w tym kwartale. 
+
+```{r}
+
+dane %>% filter(Year == 2017, Month == "April") %>%
+  ggplot(aes(x=Quantity, 
+             y=total_sales_in_euro,
+             color = as.factor(`Item Size`))) +
+    geom_point(alpha=0.5, size = 2) +
+  geom_smooth(method=lm , color="darkgrey", se=FALSE) +
+  theme_bw() +
+  labs(title = "Sprzedaż a ilość z podziałem na rozmiary w kwietniu",
+       colour = "rozmiar",
+       x = "ilość",
+       y = "wartość sprzedaży")
+
+```
+
+
+
+## Wykres nr 4
+
+Po przeanalizowaniu wartości sprzedaży i ilości w kontekście czasu, przedstawiłam ją na mapie, aby dowiedzieć się, gdzie znajdują się nasi najwięksi klienci (Ci, którzy wydają u nas najwięcej).
+Korzystając z pakietu maps tworzę mapę Polski oraz dane dotyczące lokalizacji naszych klientów Niestety nie znalazłam koordynatów dla wysztkich miast z bazy, dlatego niektóre dane mają 'NA', które zamianiłam na 0 i usunęłam. Są to jednak mniejsze miejscowości, które mają mniejszy wpływ na wynik mojej wizualizacji. Mimo wszystko sprawiło to, że nasz wykres jest przybliżeniem prawdziwej sytuacji. 
+
+```{r}
+Poland <- map_data("world") %>% 
+  filter(region=="Poland")
+
+domapy <- dane %>% 
+  select(`Address 3`,lat, long, total_sales_in_euro) %>%
+  mutate(mytext = paste(
+    "City: ",`Address 3`, "\n", 
+    "Tot. sale: ", total_sales_in_euro, sep=""))
+
+domapy[is.na(domapy)] <- 0
+
+domapy <- domapy %>% filter(lat != 0)
+
+ggplot() +
+  geom_polygon(data = Poland, 
+               aes(x=long, 
+                   y = lat, 
+                   group = group), 
+               fill="gray47", 
+               alpha=0.3) +
+  geom_point(data = domapy, 
+             aes(x = long, 
+             y = lat, 
+             size = total_sales_in_euro,
+             text = mytext),
+             colour = "darkblue") +
+  theme_void() +
+  labs("Wartoś sprzedaży dla poszczególnych miast",
+       size = "Wartość sprzedaży")
+
+```
+
+### Wnioski
+Widać, że najwięcej kupują klienci z dużych miast, ale również z ich okolic. 
+
+# Wykres nr 5
+
+Przyjrzyjmy się teraz strukrurze sprzedaży? Wyfiltruję 6 najlepiej sprzedających się marek i kolorów.
+Przedstawię ją na wykresie o nazwie dendrogram, który jest idealny do przedstawiania podziałów. Na początku zmieniam typ danych na listę węzłów. Następnię tworzę dendrogram, na którym za pomocą kolorów i wielkości pokazuję ilość sprzedanych produktów dla konkretnych marek.
+
+```{r}
+najlepsi_dostawcy <- dane %>%
+  group_by(`Supplier`) %>%
+  summarize(sum(Quantity)) %>%
+  top_n(6)
+
+data1 <- dane %>% 
+  filter(`Supplier`%in% najlepsi_dostawcy$`Supplier`) %>%
+  group_by(`Supplier`, `Item Size`) %>%
+  summarize(s1 = sum(Quantity), s2 = sum(profit_in_euro))
+
+
+data <- data.frame(
+  level1="",
+  level2=data1$Supplier,
+  level3=data1$`Item Size`,
+  level4=data1$s1)
+
+# zmieniam ramkę danych na edge list!
+edges_level1_2 <- data %>% select(level1, level2) %>% 
+  unique %>% 
+  rename(from=level1, to=level2)
+
+edges_level2_3 <- data %>% 
+  select(level2, level3) %>% 
+  unique %>% 
+  rename(from=level2, to=level3)
+
+edge_list=rbind(edges_level1_2, edges_level2_3)
+
+mygraph <- graph_from_data_frame(edge_list)
+
+par(mar=c(0,0,0,0))
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_edge_diagonal(colour="grey") +
+  geom_node_text(aes(x = x*1.09, y=y*1.09, label=c(unique(data$level1), 
+                             unique(data$level2), 
+                             data$level3)), hjust=1) +
+  geom_node_point(aes(filter=leaf, 
+                      size = c(0,najlepsi_dostawcy$`sum(Quantity)`, data$level4),
+                      color = c(0,najlepsi_dostawcy$`sum(Quantity)`, data$level2))) +
+  theme_void() +
+  scale_fill_brewer(palette="Set2") +
+  scale_color_brewer(palette = "Set2") +
+  labs(size = "Ilość produktów",
+       color = "supplier")
+
+
+
+```
+
+### Wnioski
+
+
+
+## Wykres nr 6
+
+Zobaczmy jeszcze, które produkty sprzedaja się najlepiej? 
+Pogrupowałam dane na kolory (a dokładniej na grupy 15 kolorów, czyli np. blue to wszystkie odcienie niebieskiego) oraz na rozmiary i stworzyłam zgrupowany wykres kolumnowy.
+
+```{r}
+dane1 <- dane %>% filter(`Item Color` != "Unknown")
+
+kolor <- dane1 %>%
+  group_by(color = `Group Color`) %>%
+  summarize(s = sum(Quantity)) %>%
+  filter(color != "Unknown") %>%
+  arrange(desc(s))
+
+dane1$`Group Color` = factor(dane1$`Group Color`, levels = kolor$color)
+
+dane1 %>%
+  group_by(`Group Color`) %>%
+  arrange(desc(desc(dane1$`Group Color`))) %>%
+  ggplot(mapping = aes(y = as.factor(`Group Color`), 
+                       x=Quantity, 
+                       fill=as.factor(`Item Size`))) +
+  geom_bar(stat = "identity",position="stack") +
+  theme_bw() +
+  scale_fill_brewer(palette="Set3") +
+  scale_color_brewer(palette = "Set3") +
+  labs(title = "Ilość sprzedanych produktów wg koloru i rozmiaru",
+       x = "sprzedana ilość" ,
+       y = "kolor" ,
+       fill = "rozmiar")
+
+```
+
+### Wnioski
+
+
+

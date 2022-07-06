@@ -1,0 +1,492 @@
+---
+title: "Projekt 1"
+author: "Natalia Głodek"
+date: "4 01 2022"
+output: html_document
+---
+
+# CZĘŚĆ 1
+Wybrać ok. 5 ciekawszych zadań, które robiliśmy dotąd na zajęciach i opisać ich rozwiązanie (podać kod, dodać coś słowem komentarza, być może pokazać przykłady działania). Rozsądnie dawać zadania dot. różnych technik, które pokażą, na ile przećwiczono kluczowe elementy działania.
+
+
+## zad 1
+Narysuj wykres pudełkowy z wąsem (boxplot()) dla zmiennych mpg, hp i qsec ze zbioru mtcars.
+
+```{r}
+boxplot(mtcars$mpg,
+        main = "Boxplot spalania w zbiorze mtcars",
+        col = "lightblue1",
+        horizontal = TRUE)
+
+boxplot(mtcars$hp,
+        main = "Boxplot koni mechanicznych w zbiorze mtcars",
+        col = "lightblue1",
+        horizontal = TRUE)
+
+boxplot( mtcars$qsec,
+        main = "Boxplot dla qsec w zbiorze mtcars",
+        col = "lightblue1",
+        horizontal = TRUE)
+```
+
+Dodatkowo postanowiłam zaprezentować boxplot zużycia paliwa dla poszczególnych cylindrów
+
+```{r}
+boxplot(mpg~cyl, 
+        data = mtcars, 
+        col = "lightblue1",
+        main = "Boxplot zużycia paliwa dla poszczególnych cylindrów")
+```
+
+
+## zad 2
+Stworzyć funkcję, która na podstawie długości boków trójkąta odpowiada na pytanie o to, czy trójkąt jest ostrokątny, prostokątny lub rozwartokątny.
+
+Jeżeli w trójkącie suma pól kwadratów zbudowanych na dwóch krótszych bokach jest równa polu kwadratu zbudowanego na najdłuższym boku, to trójkąt jest prostokątny, jeśli suma ta jest mniejsza, to trójkąt jest rozwartokątny, a jeśli większa - to ostrokątny.
+
+```{r}
+katy_trojkata <- function(a,b,c)
+{
+   if(a+b<=c || a+c<=b || b+c<=a)
+  {
+    print("Nie można stworzyć trójkąta z takich boków")
+  }
+  else
+  {
+    boki <- c(a, b, c)
+    nowe_a = min(boki)
+    indeks_nowe_a = which.min(boki)
+    nowe_b = min(boki[-indeks_nowe_a])
+    indeks_nowe_b = match(nowe_b, boki)
+    nowe_c = boki[-c(indeks_nowe_a,indeks_nowe_b)]
+    suma_kwadratow_a_b = nowe_a^2+nowe_b^2
+    
+    if(suma_kwadratow_a_b == nowe_c^2){return("Trójkąt jest prostokątny")}
+    else if (suma_kwadratow_a_b < nowe_c^2){return("Trójkąt jest rozwartokątny")          }
+    else if (suma_kwadratow_a_b > nowe_c^2)
+    {
+      return("Trójkąt jest ostrokatny")
+    }
+  }
+  
+}
+
+#sprawdzenie działania funkcji dla różnych trójkątów
+
+katy_trojkata(8,7,5)
+katy_trojkata(3,4,5)
+katy_trojkata(5, 7,9)
+```
+
+
+## zad 3
+Użyć instrukcji if-else oraz funkcji ifelse() do sprawdzenia, czy dowolna liczba jest podzielna przez 4.
+
+```{r}
+sprawdz_czy_podzielna_przez_4 <- function(liczba)
+  {
+  ifelse(liczba %% 4 == 0, "liczba podzielna przez 4", "liczba niepodzielna przez 4")
+  }
+
+# sprawdzam dla kilku liczb
+
+sprawdz_czy_podzielna_przez_4(4)
+sprawdz_czy_podzielna_przez_4(8)
+sprawdz_czy_podzielna_przez_4(13)
+
+```
+
+## zad 4
+Wyświetlić wszystkie kraje afrykańskie, które w roku 1957 miały PKB większe niż 12000$ A czy jesteś w stanie narysować wykres, który pokazuje ile tych krajów było w każdym roku badania?
+
+```{r}
+library(gapminder)
+library(dplyr)
+
+kraje <- gapminder %>% rename(PKB = gdpPercap, rok = year)
+kraje <- kraje %>% mutate(pop_mln = pop/1000000)
+
+#Wyświetlić wszystkie kraje afrykańskie, które w roku 1957 miały PKB większe niż 12000
+kraje_afrykanskie_1957 <- kraje %>% filter(continent == "Africa", rok == "1957", PKB > 1200)
+
+kraje_afrykanskie_1957
+
+#Wykres, który pokazuje ile tych krajów było w każdym roku badania
+kraje_afrykanskie <- kraje %>% filter(continent == "Africa", PKB > 1200) 
+
+hist(kraje_afrykanskie$rok, 
+     main = "Ilość krajów afrykańskich z PKB większym od 1200 w wybranych latach",
+     xlab = "rok", 
+     ylab = "liczba krajów")
+
+```
+
+## zad 5
+Wśród krajów o PKB niższym od 5000$ (rozważyć dane za rok 1977), wyznaczyć po trzy kraje z Afryki, Europy i Azji, w których spodziewana długość życia jest największa.
+
+```{r}
+kraje_1977 <- kraje %>% filter(rok == "1977",
+                               PKB < 5000, continent != "Americas") %>% group_by(continent) %>% top_n(3, lifeExp)
+
+kraje_1977
+```
+
+
+
+
+# CZĘŚĆ 2
+Przeanalizować dane dołączone powyżej. Rozwiązanie powinno dać odpowiedź na pytanie o to, co przedstawiają w/w dane, a następnie odpowiedzieć na 3-4 postawione przez siebie pytania badawcze. Głównym celem badania jest poćwiczenie pracy ze wstępną analizą danych, a także z pakietami: tidyr i dplyr. Nie szarżowałbym z wykresami (to będzie główna tematyka drugiego projektu).
+
+
+Najpierw wczytuje dane i uważnie je analizuje
+
+```{r}
+library(tidyr)
+dane <- read.csv(file = "C:/Folders/Studia/semstr 3/WdAD/pliki/budzety2005.csv", sep = ",")
+#str(dane)
+```
+
+
+## Jak brak wykształcenia wpływa na warunki społeczno ekonomiczne badanych osób, kim one są i dlaczego znalazły się w obecnej sytuacji?
+pytanie badawcze 1
+
+### Jak brak wykształcenia wpływa na przychody?
+```{r}
+dane1 <- dane %>% filter(age>23)
+sredni_przychod_wg_educ <- dane1 %>% 
+  group_by(educ) %>% 
+  summarize(sredni_przychod = mean(totincGUS)) %>% 
+  arrange(desc(sredni_przychod))
+
+par(mar=c(4,8,4,1))
+bar_przychod <- barplot(sredni_przychod_wg_educ$sredni_przychod, 
+        names = sredni_przychod_wg_educ$educ,
+        main = "średnie przychody wg edukacji",
+        xlim = c(0,4000),
+        horiz = T,
+        las = 1)
+
+text(bar_przychod, 
+     sredni_przychod_wg_educ$sredni_przychod + 200,
+     paste(round(sredni_przychod_wg_educ$sredni_przychod,2)),
+     cex=1) 
+```
+
+Osoby bez edukacji mają najmniejsze przychody. Ich przychód w stosunku do osób z wyższym wykształceniem jest o 131% mniejszy.
+
+### Przeanalizujmy zatem ich wydatki
+```{r}
+srednie_wydatki_wg_educ <- dane1 %>%
+  group_by(educ) %>% 
+  summarize(srednie_wydatki = mean(totexpGUS)) %>% 
+  arrange(desc(srednie_wydatki))
+
+par(mar=c(4,8,4,1))
+bar_wydatki <- barplot(srednie_wydatki_wg_educ$srednie_wydatki, 
+        names = srednie_wydatki_wg_educ$educ,
+        main = "średnie wydatki wg edukacji",
+        xlim = c(0,3500),
+        horiz = T,
+        las = 1)
+
+text(bar_wydatki, 
+     srednie_wydatki_wg_educ$srednie_wydatki + 200,
+     paste(round(sredni_przychod_wg_educ$sredni_przychod,2)),
+     cex=1) 
+```
+
+Osoby nie wykształcone w stosunku do osób z wykształceniem wyższym wydają mniej o 134%. Może sie to wiązać z mniejszymui przychodami
+
+### Zobaczmy jeszcze czy osoby z brakiem wykształcenia mają mniejsze mieszkania
+
+```{r echo=TRUE}
+ sredni_metraz_wg_educ <- dane1 %>% 
+  group_by(educ) %>% 
+  summarize(sredni_metraz = mean(flatsize)) %>% 
+  arrange(desc(sredni_metraz))
+
+par(mar=c(4,8,4,1))
+bar_metraz <- barplot(sredni_metraz_wg_educ$sredni_metraz,
+        names = sredni_metraz_wg_educ$educ,
+        main = "średni metraż wg edukacji",
+        xlim = c(0,80),
+        horiz = T,
+        las = 1)
+text(bar_metraz,
+     sredni_metraz_wg_educ$sredni_metraz + 3,
+     paste(round(sredni_metraz_wg_educ$sredni_metraz,2)),
+     cex=1) 
+
+
+
+```
+
+Osoby bez wykształcenia w stosunku do osób z wysokim wykształceniem mają mniejsze mieszkania o 13%. Jednak spośród tych grup nie mają najmniejszych mieszkań. Może to wynikać z innych czynników, tak jak miejsce zamieszkania (na wsi wydatki na mieszkania są niższe)
+
+### Kim sa osoby bez edukacji? Zacznijmy od zbadania ich płci, wieku i stanu cywilnego
+
+```{r}
+plec_educ <- dane1 %>%
+  filter(educ == "no education") %>%
+  count(sex = sex,educ = educ) %>% 
+  pivot_wider(id_cols = sex, 
+              names_from = educ, 
+              values_from = n)
+plec_educ
+
+married_educ <- dane1 %>% 
+  filter(educ == "no education") %>%
+  count(married = married,educ = educ) %>% 
+  pivot_wider(id_cols = married, 
+              names_from = educ, 
+              values_from = n)
+married_educ
+
+```
+
+Przeciętna osoba bez wykształcenia to niezamężna kobieta, powyżej 71 lat
+
+### A gdzie mieszkają osoby bez wykształcenia
+```{r}
+buildtype_educ <- dane1 %>% 
+  filter(educ == "no education") %>%
+  count(buildtype = buildtype,educ = educ) %>% 
+  pivot_wider(id_cols = buildtype, 
+              names_from = educ, 
+              values_from = n)
+buildtype_educ
+
+townsize_educ <- dane1 %>% 
+  filter(educ == "no education") %>%
+  count(townsize = townsize,educ = educ) %>% 
+  pivot_wider(id_cols = townsize, 
+              names_from = educ, 
+              values_from = n)
+townsize_educ
+```
+
+Przeciętnie to osoba zamieszkująca wolno stojący dom na wsi.
+
+### Wnioski
+Zakładając, że badanie było robione w 2005 roku, osoby niewykształcone to osoby urodzone przed II wojną swiatową. W związku z wybuchem wojny musiały przerwać edukację lub wcale jej nie rozpocząć. Mieszkając na oszarach wiejskich, po wojnie nie miały mozliwośći do wznowienia edukacji.
+W dużej większości są to kobiety, można przypuszczać iż mężczyżni albo nie przeżyli wojny albo zmarli we wcześniejszym wieku.
+Stan cywilny kobiet to w większości niezamężne, ponieważ brak jest szczegółowych danych, można przypuszcząć iż są to raczej wdowy niż panny
+
+
+## Jak industralizacja regionu wpływa na poziom życia mieszkańcow.
+pytanie badawcze 2
+```{r}
+wojregion_farmsize <- dane %>% 
+  group_by(wojregion) %>% 
+  summarize(suma_pow_rolniczych = sum(farmsize)) %>% 
+  arrange(suma_pow_rolniczych)
+
+par(mar=c(4,11,4,1))
+bar_wojeregion <- barplot(wojregion_farmsize$suma_pow_rolniczych,
+        names = wojregion_farmsize$wojregion,
+        main = "suma powierzchni rolnych wg województw",
+        xlim = c(0,4000),
+        horiz = T,
+        las = 1)
+
+text(bar_wojeregion, 
+     wojregion_farmsize$suma_pow_rolniczych + 180,
+     paste(round(wojregion_farmsize$suma_pow_rolniczych,2)),
+     cex=1)   
+```
+
+Do celów porównawczych wybieramy dwa skrajne województwa o najmniejszym i największym rozkładzie % powierchni farmy spośród wszystkich województw.
+Woj. Śląskie jest obszrem o najmniejszej powierzchi farm 314 jednostek i zajmujących 1,62 % całkowitej powierzchni badanej populacji.
+Woj. lubelskie jest obszrem o największej powierzchi farm 3842 jednostek i zajmujących 18,27 % całkowitej powierzchni badanej populacji.
+
+### Zobaczmy czy to wpływa na miejsce zamieszkania
+```{r}
+dane_woj <- dane %>% filter(wojregion %in% c("Lubelskie","Slaskie"))
+wojregion_townsize <- dane_woj %>% 
+  count(townsize = townsize,woje = wojregion) %>% 
+  pivot_wider(id_cols = townsize, 
+              names_from = woje, 
+              values_from = n)
+wojregion_townsize
+                                                       
+wojregion_buildtype <- dane_woj %>% 
+  count(buildtype = buildtype,woje = wojregion) %>% 
+  pivot_wider(id_cols = buildtype, 
+              names_from = woje, 
+              values_from = n)
+wojregion_buildtype
+
+wojregion_flatsize <- dane %>% 
+  group_by(wojregion) %>% 
+  summarize(sredni_metraz = mean(flatsize)) %>% 
+  filter(wojregion %in% c("Lubelskie","Slaskie"))
+
+barplot(wojregion_flatsize$sredni_metraz, 
+        names = wojregion_flatsize$wojregion,
+        main = "średni metraż w województwie śląskim i Lubelskim",
+        ylim = c(0,75))
+```
+
+Większość ludności ze Śląska zamieszkuje mieszkania typu multi-flat (bloki) w większych miejscowościach, natomiast w woj. Lubelskim ludzie mieszkają na wsiach w domach wolnostojących. 
+Średni metraż mieszkań jest większy na śląsku ze względu na tańsze koszty mieszkania na wsi.
+
+### A czy wpływa na edukację?
+```{r}
+wojregion_educ <- dane_woj %>% 
+  count(poziom_edukacji = educ, woje = wojregion) %>% 
+  pivot_wider(id_cols = poziom_edukacji,
+              names_from = woje, 
+              values_from = n)  
+wojregion_educ
+```
+
+Widać, że poziom edukacji jest znacznie wyższy w województwie śląskim. Oznacza to, że industrializacja ma duży wpływ na edukacje.
+
+### Zbadajmy jeszcze gdzie są większe przychody?
+```{r}
+wojregion_income <- dane %>% 
+  group_by(wojregion) %>% 
+  summarize(srednia_przychodow = mean(totincGUS)) %>% 
+  filter(wojregion %in% c("Lubelskie","Slaskie"))
+
+barplot(wojregion_income$srednia_przychodow, 
+        names = wojregion_income$wojregion,
+        main = "średnie przychody w województwie śląskim i Lubelskim",
+        ylim = c(0,2300))
+```
+
+Nie widać znacznych różnic między średnimi przychodami w woj. śląskim a w woj. lubelskim.
+
+### Wnioski
+Industralizacja danego regionu wpływa przede wszsytkim na miejsce zamieszkania jego polulacji oraz na jej edukację.
+Natomiast ma ona mniejszy wpływ na przychód całkowity.
+Srednia wielkość powierzchi mieszkaniowej w województiw lubeskim z dużą ilośćią gospodarstw rolnych, wynika z rozkładu typu budownictwa zamieszkiwanego przez populację.
+Na obszrach rolniczych są to w większości domy stojące, natomiast w regionie przemysłowym są to w większości mieszkania w blokach 
+
+
+## Kim są w Polsce osoby samozatrudnione i w jakim regionie najlepiej prowadzi im się biznes 
+pytanie badawcze 3
+```{r}
+
+typ_pracy <- dane %>% 
+  group_by(mainincHH) %>% count(mainincHH) %>% 
+  arrange(desc(n))
+par(mar=c(4,13,4,1))
+barplot(typ_pracy$n, 
+        names = typ_pracy$mainincHH,
+        main = "ilość pracowników wg typu pracy",
+        horiz = T,
+        las = 1,
+        xlim = c(0,7600))
+
+
+total_income <- sum(dane$totincGUS)
+
+praca_income <- dane %>% 
+  group_by(mainincHH) %>% 
+  summarize(procent_totinc = sum((totincGUS)/total_income)*100) %>%
+  arrange(desc(procent_totinc))
+
+barplot(praca_income$procent_totinc, 
+        names = praca_income$mainincHH,
+        main = "przychód ze wg na typ pracy (w %)",
+        horiz = T,
+        las = 1,
+        xlim = c(0,30))
+
+```
+
+### Czy dominują tutaj nieżonaci mężczyźni?
+
+Osoby samozatrudnione (nie w rolnictwie) stanowią 2041 osoób, czyli 6,8% badanych. Odpowiadaja oni aż za 10,14% całkowitego przychodu.
+
+```{r}
+plec_praca <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>%
+  count(sex = sex,typ_pracy = mainincHH) %>%
+  pivot_wider(id_cols = sex, 
+              names_from = typ_pracy, 
+              values_from = n)
+plec_praca
+
+married_praca <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>%
+  count(married = married,typ_pracy =mainincHH) %>%
+  pivot_wider(id_cols = married, 
+              names_from = typ_pracy, 
+              values_from = n)
+married_praca
+
+```
+
+Wśród osoób samozatrudnionych znajdują się zarówno kobiety jak i mężczyźni. Mężczyzn jest wiecej, jednak nie jest to bardzo mała różnica.
+Ku mojemu zdziwieniu więcej (nieznacznie) jest osób w związku małżeńskim.
+
+### Gdzie najlepiej prowadzi im się biznes?
+
+```{r}
+praca_woje1 <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>% 
+  group_by(wojregion) %>% count(mainincHH)
+
+praca_woje2 <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>% 
+  group_by(wojregion) %>% 
+  summarize(sredni_income = mean(totincGUS))
+
+woje <- data.frame(wojewodztwa = praca_woje1$wojregion,
+                   liczba_samozatrudnionych = praca_woje1$n,
+                   sredni_przychod = praca_woje2$sredni_income )
+woje
+
+praca_miasta1 <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>% 
+  group_by(townsize) %>% 
+  count(mainincHH)
+
+praca_miasta2 <- dane %>% 
+  filter(mainincHH == "nonfarm selfempl.") %>% 
+  group_by(townsize) %>% 
+  summarize(sredni_income = mean(totincGUS))
+
+miasta <- data.frame(miasta = praca_miasta1$townsize,
+                     liczba_samozatrudnionych = praca_miasta1$n,
+                     sredni_przychod = praca_miasta2$sredni_income)
+miasta
+
+```
+
+Samozatrudnionym najlepiej wiedzie się w woj. Mazowieckim, gdzie średni dochód to 4384,49 i jest prawie dwukrotnie wyższy niż w woj. Lubuskim. 
+Aż 28,71% wszystkich samozatrudnonych zlokalizowanych jest w wioskach, ale już ich udział w ogólnym przychodzie to 25,04%.
+Po przeciwległej stronie są miasta powyżej 500 000 mieszkańców, w których znajduje się 15,19% wszystkich samozatrudnionych, ale generują oni 22,95% przychodu. Również średnie przychody są zdecydwoanie większe w miastach powyżej 500 000 niż w wioskach.
+
+
+## W jakim rodzaju budynku (multi-flat, free standing, terrace/twin, other) rachunki są najwyższe (i najniższe) w poszczególnych województwach
+pytanie badawcze 4
+
+```{r}
+srednie_wydatki_na_metr <- dane %>% group_by(wojregion, buildtype) %>% summarize(srednie_wydatki_na_metr = mean(bills/flatsize))
+srednie_wydatki_na_metr
+
+wydatki_wojewodztwo_typ_max <- srednie_wydatki_na_metr %>% top_n(1, srednie_wydatki_na_metr)
+wydatki_wojewodztwo_typ_max
+
+wydatki_wojewodztwo_typ_min <- srednie_wydatki_na_metr %>% top_n(-1, srednie_wydatki_na_metr)
+wydatki_wojewodztwo_typ_min
+```
+
+W większości województw najtańsze rachunki wychodzą w domu wolno stojącym. Może to wynikać, z faktu iż owe budynki znajdują się głownie na wsiach, przez co ich koszty są dużo mniejsze.
+
+Jeżeli chodzi o najwyższe kosty, to w wielu województwach przypadają one na multi-flat, czyli bloki. Najprawdopodobniej jest tak dlatego, iz znajdują sie one głównie w dużych miastach, przez co rachunki staja sie wyższe.
+
+## Wnioski ogólne
+Dane predstawiają bardzo dużo różnych informacji. 
+Możemy się dowiedzieć o sposobie mieszkania badanych osób: 
+- czy mieszkają w mieście czy na wsi
+- w jakim typie zabudowy mieszkają
+- jaka jest własność
+Wiele również możemy wywnioskować, analizując edukacje i jej wpływ na badanych. 
+W danych tych jest również kilka ciekawych informacji o przychodach, wydatkach czy rachunkach.
+Analizując dane budżet2005 dostrzegłam, że badanie zostało przeprowadzone głównie na ludziach mieszkających na wsiach.
+
+
