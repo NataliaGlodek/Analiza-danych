@@ -1,0 +1,421 @@
+---
+title: "Ekonometria - projekt"
+author: Natalia Głodek i Faustyna Bąk
+output:
+  html_document:
+    df_print: paged
+---
+```{r include=FALSE}
+library(dplyr)
+library(tidyr)
+library(lmtest)
+library(ggplot2)
+library(caTools)
+```
+
+# Przedstawienie zagadnienia, przedstawienie danych (opis, źródło danych)
+
+Naszą pracę rozpoczęłyśmy od przygotowania bazy danych. W porozumieniu z firmą X weszłyśmy w posiadanie danych sprzedażowych za rok 2017 oraz 2018. Firma zajmuje się detaliczną oraz hurtową dystrybucją odzieży i tekstyliów w Polsce. Dostarczone dane zostały odpowiednio okrojone poprzez usunięcie rekordów z topowymi klientami. Zobowiązałyśmy się również, iż w związku z ustawą RODO, usuniemy wszystkie dane osobowe, pozwalające na identyfikację klientów firmy. Dlatego usunęłysmy kolumny przedstawiające szczegółowe dane adresowe i kontaktowe. Nazwy kontrahentów podmieniłyśmy na nazwiska olimpijczyków z zewnętrznej bazy danych. Dostarczone baza została wyeksportowana z systemu ERP firmy X i zapisana w postaci pliku csv.
+
+Ponieważ nasze dane potrzebowały wielu transformacji, wykresy i statystyki znajdują sie w 2 części
+
+#	Transformacje wykonane na danych (np. usuwanie braków, usuwanie zmiennych, modyfikacja) oraz analiza (wykresy)
+
+```{r}
+# wczytywanie danych
+sample <- read.csv('sample.csv', dec = ".", sep = ';')
+produkt <- read.csv('produkt.csv', sep = ';')
+```
+
+Każdy wiersz w tabeli sample odpowiada za jedną operację z faktury. Są tam takie informacje jak nazwa klienta, adres zakupu,metoda płatności, data, kod produktu, jego cen oraz ilość.
+
+```{r}
+head(sample)
+```
+
+W tabeli produkt znajdują się dokładne dane produktu. Każdy kod zawiera cenne informacje o kolorze, rozmiarze czy stylu.
+
+```{r}
+head(produkt)
+```
+
+Z danych wybieramy elementy invoice, czyli faktury (w naszej nalizie nie będziemy brały pod uwagę zwrotów) oraz eliminujemy dane z fracht, gdyż jest to informacja o transporcie, która nie jest nam potrzebna.
+
+```{r}
+# wyfiltrowane dane bez fracht - transport i invoice, czyli dane z faktury, bez zwrotów
+sample <- sample %>% filter(sample$Item.Type != "Fracht", sample$Document.Type == "Invoice")
+```
+
+Teraz wybieramy odpowiednie kolumny. Nie interesują nas takie dane jak np. numer klienta, jego dokładny adres, numer dokumentu czy opis produktu.
+
+```{r}
+# wybieram interesujące mnie kolumny
+sample <- sample %>% select(Client.Name, Address.2, Payment.Method, Year, Month,Item.Code, Item.Color, Item.Size, Supplier, Quantity, Item.Price, Euro.Rate, Delivery.Method)
+
+# zmieniam nazwy kolumn
+colnames(sample) = c("Client.Name", "Postcode", "Payment.Method", "Year", "Month","Item.Code", "Item.Color", "Item.Size", "Supplier", 
+                      "Quantity", "Item.Price","Euro.Rate", "Delivery.Method")
+
+```
+
+Ponieważ jest to firma międzynrodowa ceny są zarówno w złotówkach jak i w euro, musimy doprowadzić do jednej waluty. Do tego przyda się kolumna euro rate, gdy cena jest w złotówkach eurorate = 4.3706, a gdy w euro eurorate = 1
+
+```{r}
+sample <- sample %>% mutate(price.in.euro = Item.Price * Euro.Rate)
+```
+
+
+Ponieważ jest bardzo dużo rożnych kolorów, pobieramy grupy kolorów z tabeli produkt (np czerwony zawiera w sobie jasny czerwony, burgundowy, bordowy, itp). 
+
+```{r}
+
+produkt_color <- produkt %>% select(Item.Colour, ColourGroup)
+produkt_color <- unique(produkt_color)
+colnames(produkt_color) = c('Item.Color','ColourGroup')
+sample <- sample %>% inner_join(produkt_color, by = 'Item.Color')
+table(sample$ColourGroup)
+
+```
+
+Jak widać mimo zawężenia kolorów jest ich nadal bardzo dużo. Zobaczmy, które z nich sprzedają się najlepiej.
+
+```{r}
+kolor <- sample %>%
+  group_by(color = ColourGroup) %>%
+  summarize(s = sum(Quantity)) %>%
+  filter(color != "Unknown") %>%
+  arrange(desc(s))
+
+kolor %>% ggplot(aes(y = as.factor(color),
+                     x = s)) +
+  geom_bar(stat = "identity",position="stack") +
+  theme_bw()
+
+```
+
+Jak widać na wykresie najlepiej sprzedaje się kolor czarny i biały. Dlatego decydujemy się na jeszcze większe zawężenie kolorów i tworzymy klasy: biały, czarny i inny.
+
+```{r}
+sample <- sample %>% mutate(color = ifelse(ColourGroup == "White", "White", ifelse(ColourGroup == "Black", "Black", "other")))
+```
+
+
+Ponieważ supplier jest zapisane za pomocą cyfr i jest bardzo dużo grup, z tabeli produkt wybieramy kolumne brand group i łączymy ją z sample.
+
+```{r}
+
+produkt_brand <- produkt %>% select(ItemBrand, Brand.Group)
+produkt_brand <- unique(produkt_brand)
+colnames(produkt_brand) = c('Supplier', 'Brand.Group')
+sample <- sample %>% inner_join(produkt_brand, by = 'Supplier')
+
+```
+
+
+Następnie z tabeli produkt wybieramy kolumne Category, jest to ważna informacja o stylu prodkuktu. Podobnie jak poprzedno łączymy dwie tabele za pomocą kolumny Item.Code
+
+```{r}
+produkt_style <- produkt %>% select(ItemCode, Category)
+colnames(produkt_style) = c('Item.Code', 'Category')
+produkt_style <- unique(produkt_style)
+sample <- sample %>% inner_join(produkt_style, by = 'Item.Code')
+
+table(produkt_style$Category)
+```
+
+Przydatną daną może być również informacja o klientach.
+
+```{r}
+length(table(sample$Client.Name))
+```
+
+Ponieważ mamy zdecydowanie za dużo różnych klientów, pogrupujemy ich a następnie złączymy z tabelką sample
+
+```{r}
+klienci <- data.frame(Client.Name = sample$Client.Name, Quantity = sample$Quantity) %>% group_by(Client.Name) %>% summarize(sum = sum(Quantity))
+klienci <- klienci %>%  mutate(Client.Category = ifelse(sum < 500, "small", ifelse(sum<1000, "medium", ifelse(sum<3000, "big", ifelse(sum<5000, "very.big", 'huge'))))) %>% select(-sum)
+
+sample <- sample %>% inner_join(klienci, by = 'Client.Name')
+```
+
+Po przygotowaniu wszystkich kolumn, wybieramy odpowiednie i zmieniamy dane na dane kategoryczne.
+
+```{r}
+sample <- sample %>% select(-Client.Name, -Postcode, - Item.Code,-Item.Color,-Supplier, -Item.Price, -Euro.Rate, -ColourGroup) %>% mutate(Payment.Method = as.factor(Payment.Method),
+                            Year = as.factor(Year),
+                            Month = as.factor(Month),
+                            Delivery.Method = as.factor(Delivery.Method),
+                            color = as.factor(color),
+                            Brand.Group = as.factor(Brand.Group),
+                            Category = as.factor(Category),
+                            Client.Category = as.factor(Client.Category)
+                            )
+```
+
+# Dobór zmiennych
+
+Aby odpowiednio dobrać zmienne najpier musimy je pogrupować. Postanowłyśmy pogrupować je na kilka różnych sposobów a następnie wybrać model z najlepszym $R^2$.
+W każdym przypadku będziemy usuwać po jednej zmiennej (od najmniej istotnych) aż $R^2$ Adjusted będzie największe. Ponieważ nasze dane są kategoryczne, w przypadku gdy np. miesiąc styczeń będzie nieistotny, ale miesiąc luty będzie istotny, to pozostawiamy wszystkie miesiące.
+
+
+### sample 1
+
+Najpierw grupujemy po wszystkich zmiennych, sumując quantity i biorąc średnią z price.
+```{r}
+sample_1 <- sample %>% group_by(Category,color, Month, Year, Client.Category, Brand.Group,  Delivery.Method) %>% summarize(Total.Quantity = sum(Quantity), avg_price_in_euro = mean(price.in.euro))
+
+```
+
+```{r}
+dummy_vars_1 <- model.matrix( ~ Category + color + Month + Year + Client.Category + Brand.Group + Delivery.Method, sample_1)
+
+data_all_1 <- cbind(sample_1, dummy_vars_1) 
+data_all_1 <- data_all_1[,8:ncol(data_all_1)]
+data_all_1 <- data_all_1[,-3]
+
+model1a <- lm(Total.Quantity ~., data_all_1)
+summary(model1a)
+
+model1b <- lm(Total.Quantity ~. -MonthAugust -MonthDecember -MonthFebruary -MonthJanuary 
+              -MonthJuly -MonthJune -MonthMarch -MonthMay -MonthNovember -MonthOctober -MonthSeptember  , data_all_1)
+summary(model1b)
+```
+
+
+### sample 2 
+
+Grupujemy wybierając kolor, miesiac, kategorie i rok.
+
+```{r}
+sample_2 <- sample %>% group_by(Category,color, Month, Year) %>% summarize(Total.Quantity = sum(Quantity), avg_price_in_euro = mean(price.in.euro))
+
+sample_2a <- data.frame(sapply(sample_2, unclass))
+
+
+dummy_vars_2 <- model.matrix( ~ Category , sample_2)
+
+data_all_2 <- cbind(sample_2a, dummy_vars_2) 
+data_all_2 <- data_all_2[,2:ncol(data_all_2)]
+data_all_2 <- data_all_2[-6]
+
+
+model2a <- lm(Total.Quantity ~ ., data_all_2)
+summary(model2a)
+#avg_price in euro ma małą istotność, więc wyrzucam ją i sprawdzam r^2
+model2b <- lm(Total.Quantity ~ . -avg_price_in_euro, data_all_2)
+summary(model2b)
+#bez tej zmiennej r^2 nieznacznie wzroslo
+
+model2c <- lm(Total.Quantity ~ . -avg_price_in_euro - Year, data_all_2)
+summary(model2c)
+#bez tej zmiennej r^2 maleje
+#wybieram model2b
+
+```
+### sample 3
+Wybieramy Category, color, Month, Client.Category
+
+```{r}
+sample_3 <- sample %>% group_by(Category, color, Month, Client.Category) %>% summarize(Total.Quantity = sum(Quantity), avg_price_in_euro = mean(price.in.euro))
+
+dummy_vars_3 <- model.matrix(~ Category + Month + color + Client.Category, sample_3)
+
+data_all_3 <- cbind(sample_3, dummy_vars_3) 
+data_all_3 <- data_all_3[,5:ncol(data_all_3)]
+data_all_3 <- data_all_3[,-3]
+
+model3a <- lm(Total.Quantity ~ ., data_all_3)
+summary(model3a)
+```
+
+
+
+# Postać modelu
+
+Po wielu kombinacjach i doborze zmiennych wybieramy model2b, czyli dane pogrupowane po Category,color, Month, Year a w modelu wybrane takie zmienne jak: Year, Category, color i Month, bez avg_price
+
+```{r}
+sample(data_all_2)
+summary(model2b)
+lm(model2b)
+```
+$Total.Quantity = 15680.3 -969.4 * color + 185.8 * Month + 801.7 * Year -13085.8 * CategoryCaps - 15248.6 * CategoryFleeces -14996.2 * CategoryJackets -11895.3 * CategoryPolos -15616.2 * CategoryShirts - 11552.0 * CategorySweats +33575.2 * CategoryT-Shirts -13593.5 * CategoryVarious$
+
+# Diagnostyka modelu
+
+Wszystkie testy będziemy robić przy poziomie istotności $\alpha = 0.05$
+
+### Wartość oczekiwana reszt
+Wartość oczekiwana reszt powinna być bliska zeru.
+
+```{r}
+mean(model2b$residuals)
+```
+Wartość oczekiwana jest bliska 0
+
+### Test Breusha Pagan’a
+
+Teraz sprawdzimy czy składnik losowy jest homoskedastyczny, czyli czy ma jednorodne wariancje. Do tego użyjemy testu Breusha Pagan’a.
+
+$H_0:$ Wariancje są jednorodne - występuje homoskedastyczność
+
+$H_1:$ Wariancje nie są jednorodne - występuje heteroskedastyczność
+
+```{r}
+bptest(model2b) 
+```
+
+Ponieważ p-value jest mniejsze od naszego poziomu istotności to odrzucamy $H_0$. Oznacza to, że w naszym modelu występuje heteroskedastyczność.
+
+
+### Test na autokorelacje
+
+Test Durbina-Watsona
+Wykrywanie autokorelacji
+
+$H_0:$ p = 0
+
+$h_1:$ p > 0
+
+
+```{r}
+dwtest(model2b)
+```
+
+Ponieważ p-value jest mniejsze od naszego poziomu istotności to odrzucamy $H_0$. Oznacza to, że w naszym modelu wystepuje autokorelacja
+
+
+```{r}
+acf(model2a$residuals, type = 'correlation')
+```
+
+Pierwszy słupek zawsze wychodzi 1. Z tego wykresu wynika, że autokorelacja nie jest bardzo duża.
+
+### Istotność wszystkch parametrów
+
+Stosujemy do tego uogólniony test walda
+
+$H_0: \alpha_1 = ... = \alpha_k = 0$ 
+
+$h_1:$ co najmniej jedna z $\alpha_j,j=k+1,..,k$ jest różna od zera
+
+W R możemy zrobić test Walda lub zinterpretować statystykę F z summary(model2a)
+
+```{r}
+waldtest(model2b)
+```
+
+```{r}
+summary(model2b)
+```
+
+Ponieważ p-value jest mniejsze od 0.05 odrzucamy hipotezę zerową na rzecz hipotezy alternatywnej. Na tym poziomie istotności można powiedzieć, że minimum jeden parametr jest istotny.
+
+### Normalność reszt
+
+$H_0$ reszty mają rozkład normalny
+$H_1$ reszty nie mają rozkładu normalnego
+
+```{r}
+shapiro.test(model2a$residuals)
+```
+Odrzucamy $H_0$ a więc reszty nie mają rozkładu normalnego.
+
+### Test RESET
+
+Sprawdzmy czy model ma dobrze dobraną postać
+
+$H_0$ wybór postaci analitycznej modelu jest prawidłowy
+
+$H_1$  wybór postaci analitycznej modelu nie jest prawidłowy
+
+```{r}
+resettest(model2a)
+```
+Z testu wynika, że dobór postaci modelu nie jest prawidłowy.
+
+# Próba poprawy modelu
+Ponieważ w naszym modelu występuje autokorelacja i heteroskedastyczność a test RESET pokazał, że mamy złą postać modelu to musimy zmodyfikować model2a.
+
+Próba usunięcia autokorelacji
+```{r}
+model2b_pop <- lm(Total.Quantity ~ CategoryCaps + CategoryFleeces + CategoryJackets + CategoryPolos + CategoryShirts + CategorySweats + `CategoryT-Shirts` + CategoryVarious + color + Month + Year/sqrt(Year), data_all_2)
+
+dwtest(model2b_pop)
+
+
+```
+
+Udało się usunąć autokorelacje.
+
+
+Próba usunięcia heteroskedastyczności - użycie ważonej metody najmniejszych kwadratów
+
+
+```{r}
+wt <- 1 / lm (abs(model2b$residuals)~model2b$fitted.values)$fitted.values^2
+wls_model2b <- lm(Total.Quantity ~ CategoryCaps + CategoryFleeces + CategoryJackets + CategoryPolos + CategoryShirts + CategorySweats + `CategoryT-Shirts` + CategoryVarious + color + Month + Year, data_all_2, weights = wt)
+
+bptest(wls_model2b)
+bgtest(wls_model2b)
+summary(wls_model2b)
+```
+Udało się usunąć heteroskedastyczność, jednak $R^2$ znacznie zmalało i pojawiła się autokorelacja. Dlatego będziemy używać modelu - model2b_pop z heteroskedastycznością.
+
+#	Podział na zbiór treningowy i testowy
+
+```{r}
+split <- sample.split(data_all_2$color, SplitRatio = 0.8)
+
+train <- subset(data_all_2, split == TRUE)
+test <- subset(data_all_2, split == FALSE)
+
+```
+
+#	Prognoza na zbiór testowy i błędy prognozy
+
+Tworzę model dla zbiory treningowego
+
+```{r}
+model2b_pop_train <- lm(Total.Quantity ~ CategoryCaps + CategoryFleeces + CategoryJackets + CategoryPolos + CategoryShirts + CategorySweats + `CategoryT-Shirts` + CategoryVarious + color + Month + Year/sqrt(Year), train)
+summary(model2b_pop_train)
+```
+
+
+Tworzę predykcję dla zbioru testowego
+
+```{r}
+prediction <- predict(model2b_pop_train, test, se.fit = TRUE)
+```
+
+Wyliczam błedy ex-post
+
+```{r}
+ex_post <- test$Total.Quantity - prediction$fit  #bledy prognoz
+(MAE <- mean(abs(ex_post)))  #mean absolute error - o ile srednio bledy sie odchylaly
+(RMSE <- mean(sqrt((ex_post)^2)))  #Root Mean Squared error
+(MAPE <- mean(abs((test$Total.Quantity - prediction$fit))/test$Total.Quantity)) #Mean Absolute Percentage Error
+
+
+id <- c(1:129)
+test <-cbind(test, id = id)
+
+```
+
+Wykres przedstawiający błędy prognozy
+
+```{r}
+
+predykcja_blad <- data.frame( id = test$id, predykcja = prediction$fit, SE = prediction$se.fit)
+predykcja_blad %>% ggplot(aes(x = id, y = predykcja )) + 
+  geom_col() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_errorbar(aes(ymin = predykcja - SE, ymax = predykcja + SE), color = "red")
+```
+
+#	Podsumowanie (w tym interpretacja)
+
+Nasz model nie spełnia kilku założeń (występuje heteroskedastyczność i reszty nie mają rozkładu normalnego) jednak $R^2$ jest dość wysokie a prognozy są dość bliskie prawdziwym wartością. Pomimo wielu prób (m. in. logarytmowania zmiennych, pierwiastkowania zmiennych) nie udało nam się stworzyć lepszego modelu, który przechodziłby pozytywnie wszystkie testy.
+
+Bardzo przepraszamy za opóźnienie w przesłaniu projektu, błędnie zrozumiałyśmy datę przesłania na upelu. 
+
